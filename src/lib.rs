@@ -55,15 +55,177 @@ pub const GENERATOR_Y: [u8; 32] = [
 // G constant (generator point) - all calculations start with this point
 pub const G: (&[u8; 32], &[u8; 32]) = (&GENERATOR_X, &GENERATOR_Y);
 
-pub enum EcdsaError {}
+pub enum EcdsaError {
+    InvalidPointAddition,
+}
+
+pub enum ArithmeticError {
+    InvalidAddition,
+    InvalidSubstraction,
+    InvalidMultiplicaiton,
+    //InvalidAddition,
+}
+
+/// Helper function to compare arrays of [u8;32] .
+/// TODO: Move to separate file later
+fn is_greater_or_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
+    for i in 0..=31 {
+        if x[i] > y[i] {
+            return true;
+        } else if x[i] < y[i] {
+            return false;
+        }
+    }
+    true
+}
+
+// A point on the secp256k1 curve
+#[derive(Clone, Debug, PartialEq)]
+pub struct Point {
+    x: [u8; 32],
+    y: [u8; 32],
+}
+
+impl Point {
+    /// The generator point G
+    pub fn generator() -> Self {
+        Point {
+            x: GENERATOR_X,
+            y: GENERATOR_Y,
+        }
+    }
+
+    // Scalar multiiplcation - doubles a point
+    pub fn double() -> Self {
+        unimplemented!("Need to implement point doubling")
+    }
+
+    // Point addition is a geometric operation which takes 2 points on the curve
+    // P and Q and produces a third point R = P + Q.
+    //
+    // Considerations:
+    //
+    // P and Q are distinct points (P != Q)
+    // 2 other considerations (will handle later)
+    //  1. P = Q --> this is point doubling
+    //  2. One of the points is the point at infinity or (0, 0)
+    pub fn add(p: Point, q: Point) -> Result<Point, EcdsaError> {
+        if p.x == q.x && p.y == q.y {
+            panic!("Use double() for equal points");
+        }
+
+        // compute slope: s = (y2 - y1) / (x2 - x1) mod P
+
+        unimplemented!()
+    }
+}
+
+mod arithmetic_operations {
+    use super::*;
+
+    // addition operation: c = (a + b) mod P
+    //
+    // a and b are inputs being added together
+    // modulus is my P (finite field size)
+    // Result C must be in range of [0, P-1]
+    //
+    pub fn addition(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
+        let mut result = [0; 32];
+        let mut carry = 0;
+
+        // iterate over 32 byte arrays from right to left
+        for i in (0..32).rev() {
+            // cast values as u16 to catch overflow
+            let temp = a[i] as u16 + b[i] as u16 + carry as u16;
+            // Set the ith value of result as u8 (0-255) value
+            result[i] = temp as u8;
+            // If overflow occured (a+b was larger then 255) carry it over to the next iteration
+            carry = (temp >> 8) as u8;
+        }
+        // Check if either condition is true:
+        // carry != 0: a + b >= 2**256
+        // result >= modulus: a + b > P
+        if carry != 0 || is_greater_or_equal(&result, modulus) {
+            //result = substract(result, modulus, modulus)
+            unimplemented!("requires substract function");
+        }
+
+        result
+    }
+
+    pub fn substract(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
+        unimplemented!()
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use arithmetic_operations::addition;
+
     use super::*;
 
+    #[test]
+    fn test_simple_byte_array_addition() {
+        let a: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x03,
+        ];
+
+        let b: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x05,
+        ];
+
+        let correct_result: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x08,
+        ];
+
+        let result = addition(&a, &b, &P);
+
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_byte_array_addition_with_carry() {
+        let a: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xFF,
+        ];
+
+        let b: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01,
+        ];
+
+        let correct_result: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00,
+        ];
+
+        let result = addition(&a, &b, &P);
+
+        assert_eq!(result, correct_result);
+    }
+
     //#[test]
-    //fn multiply() {
-    //    let result = add(2, 2);
-    //    assert_eq!(result, 4);
+    //fn test_is_greater_or_equal() {
+    //    let x1 = [0x01, 0x00, 0x00]; // 256
+    //    let y1 = [0x02, 0x00, 0x00]; // 512
+    //    assert_eq!(is_greater_or_equal(&x1, &y1), false); // 256 < 512
+    //
+    //    let x2 = [0x02, 0x00, 0x00]; // 512
+    //    let y2 = [0x01, 0x00, 0x00]; // 256
+    //    assert_eq!(is_greater_or_equal(&x2, &y2), true); // 512 > 256
+    //
+    //    let x3 = [0x01, 0x00, 0x00]; // 256
+    //    let y3 = [0x01, 0x00, 0x00]; // 256
+    //    assert_eq!(is_greater_or_equal(&x3, &y3), true); // 256 = 256
     //}
 }
