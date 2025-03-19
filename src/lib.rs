@@ -121,6 +121,8 @@ impl Point {
 }
 
 mod arithmetic_operations {
+    use std::num::Wrapping;
+
     use super::*;
 
     // addition operation: c = (a + b) mod P
@@ -146,21 +148,52 @@ mod arithmetic_operations {
         // carry != 0: a + b >= 2**256
         // result >= modulus: a + b > P
         if carry != 0 || is_greater_or_equal(&result, modulus) {
-            //result = substract(result, modulus, modulus)
-            unimplemented!("requires substract function");
+            result = subtract(&result, modulus, modulus)
         }
 
         result
     }
 
-    pub fn substract(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
-        unimplemented!()
+    // substract operation: c = a - b mod P
+    //
+    // a and b: 256-bit integers as [u8;32] (big endian)
+    // P: is modulus (the secp256k1 prime / fixed of my finite field)
+    // c: must be in the range of [0, P-1]
+    //
+    //NOTE: addition has carries, substract has borrowing when a[i] < b[i]
+    // This implies a negative result, so we add P to wrap it around
+    // (back to postive) while ensuring it's < P.
+    pub fn subtract(a: &[u8; 32], b: &[u8; 32], modulus: &[u8; 32]) -> [u8; 32] {
+        let mut result = [0; 32];
+        let mut borrow = 0;
+
+        // iterate over 32 byte arrays from right to left
+        for i in (0..32).rev() {
+            // cast values as u16 to catch overflow
+            let mut temp = Wrapping(a[i] as u16) - Wrapping(b[i] as u16) - Wrapping(borrow as u16);
+            println!("i={}, temp={}", i, temp.0);
+            if temp > Wrapping(255) {
+                temp = temp + Wrapping(256);
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+            result[i] = temp.0 as u8;
+        }
+
+        // if borrow is not 0, then result is negative
+        // run the result through addition to add P to it
+        if borrow != 0 || is_greater_or_equal(&result, modulus) {
+            result = addition(&result, modulus, modulus);
+        }
+
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use arithmetic_operations::addition;
+    use arithmetic_operations::{addition, subtract};
 
     use super::*;
 
@@ -228,4 +261,54 @@ mod tests {
     //    let y3 = [0x01, 0x00, 0x00]; // 256
     //    assert_eq!(is_greater_or_equal(&x3, &y3), true); // 256 = 256
     //}
+
+    //#[test]
+    //fn test_simple_byte_array_substraction() {
+    //    let a: [u8; 32] = [
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x01, 0x02,
+    //    ];
+    //
+    //    let b: [u8; 32] = [
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x00, 0x04,
+    //    ];
+    //
+    //    let correct_result: [u8; 32] = [
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    //        0x00, 0x00, 0x00, 0x02,
+    //    ];
+    //
+    //    let result = subtract(&a, &b, &P);
+    //
+    //    assert_eq!(result, correct_result);
+    //}
+
+    #[test]
+    fn test_wrapping_byte_array_substraction() {
+        let a: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00,
+        ];
+
+        let b: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01,
+        ];
+
+        let correct_result: [u8; 32] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xFF,
+        ];
+
+        let result = subtract(&a, &b, &P);
+
+        assert_eq!(result, correct_result);
+    }
 }
