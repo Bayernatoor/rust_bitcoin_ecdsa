@@ -69,14 +69,18 @@ pub enum ArithmeticError {
 /// Helper function to compare arrays of [u8;32] .
 /// TODO: Move to separate file later
 fn is_greater_or_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
+    println!("x: {:?}, y: {:?}", x, y);
     for i in 0..32 {
         if x[i] > y[i] {
+            println!("x is bigger, true");
             return true;
         }
         if x[i] < y[i] {
+            println!("x is smaller(false)");
             return false;
         }
     }
+    println!("they are equal ");
     true
 }
 
@@ -140,14 +144,12 @@ mod arithmetic_operations {
         for i in (0..32).rev() {
             // cast values as u16 to catch overflow
             let temp = a[i] as u16 + b[i] as u16 + carry as u16;
-            println!("IN ADDITION: i:{}, temp:{},", i, temp);
             // Set the ith value of result as u8 (0-255) value
             result[i] = temp as u8;
             // If overflow occured (a+b was larger then 255) carry it over to the next iteration
             carry = (temp >> 8) as u8;
         }
 
-        println!("ADDITION LOOP END: carry: {:?},", carry);
         // We need to adjust result if our value is > P or >= P
         //
         // Only adjust if not already 0 with carry (i.e., 2^256 mod P)
@@ -158,11 +160,9 @@ mod arithmetic_operations {
             && (carry != 0 || is_greater_or_equal(&result, modulus))
             && !(is_zero && carry == 1)
         {
-            println!("CARRY > 0, RESULT: {:?},", result);
             result = subtract(&result, modulus, modulus, true)
         }
 
-        println!("EXITING ADDITION: result: {:?},", result);
         result
     }
 
@@ -183,10 +183,8 @@ mod arithmetic_operations {
         for i in (0..32).rev() {
             // cast values as u16 to catch overflow
             let mut temp = Wrapping(a[i] as u16) - Wrapping(b[i] as u16) - Wrapping(borrow as u16);
-            println!("i={}, temp={}", i, temp.0);
             if temp > Wrapping(255) {
                 temp += Wrapping(256);
-                println!("temp was smaller then wrapping 255: {:?}", temp.0);
                 borrow = 1;
             } else {
                 borrow = 0;
@@ -194,14 +192,12 @@ mod arithmetic_operations {
             result[i] = temp.0 as u8;
         }
 
-        println!("SUBTRACT LOOP END: borrow: {:?},", borrow);
         // if borrow is not 0, then result is negative
         // run the result through addition to add P to it
         if !adjustment && borrow != 0 {
             result = addition(&result, modulus, modulus, true);
         }
 
-        println!("EXITING SUBTRACT: result: {:?},", result);
         result
     }
 }
@@ -211,6 +207,39 @@ mod tests {
     use arithmetic_operations::{addition, subtract};
 
     use super::*;
+
+    #[test]
+    fn test_is_greater_or_equal() {
+        // 256
+        let x1 = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x00,
+        ];
+        // 512
+        let y1 = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x02, 0x00, 0x00,
+        ];
+
+        let x2 = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x00,
+        ];
+
+        let y2 = [
+            0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x00,
+        ];
+
+        assert_eq!(is_greater_or_equal(&x1, &y1), false); // 256 < 512
+        assert_eq!(is_greater_or_equal(&y1, &x1), true); // 512 > 256
+        assert_eq!(is_greater_or_equal(&x2, &x1), true); // 256 = 256
+        assert_eq!(is_greater_or_equal(&y2, &y1), true); // 256 < 512
+    }
 
     #[test]
     fn test_simple_byte_array_addition() {
@@ -266,7 +295,6 @@ mod tests {
         let b = one;
         let correct_result = [0; 32]; // 0 mod P
         let result = addition(&a, &b, &P, false);
-        println!("P-1 + 1 = {:?}", result);
         assert_eq!(result, correct_result);
     }
     #[test]
@@ -282,20 +310,31 @@ mod tests {
         println!("2^256 - 1 + 1 = {:?}", result);
         assert_eq!(result, correct_result);
     }
-    //#[test]
-    //fn test_is_greater_or_equal() {
-    //    let x1 = [0x01, 0x00, 0x00]; // 256
-    //    let y1 = [0x02, 0x00, 0x00]; // 512
-    //    assert_eq!(is_greater_or_equal(&x1, &y1), false); // 256 < 512
-    //
-    //    let x2 = [0x02, 0x00, 0x00]; // 512
-    //    let y2 = [0x01, 0x00, 0x00]; // 256
-    //    assert_eq!(is_greater_or_equal(&x2, &y2), true); // 512 > 256
-    //
-    //    let x3 = [0x01, 0x00, 0x00]; // 256
-    //    let y3 = [0x01, 0x00, 0x00]; // 256
-    //    assert_eq!(is_greater_or_equal(&x3, &y3), true); // 256 = 256
-    //}
+
+    #[test]
+    fn test_addition_two_large_numbers() {
+        let two = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02,
+        ];
+        let three = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x03,
+        ];
+        let five = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x05,
+        ];
+        let a = subtract(&P, &two, &P, false); // P - 2
+        let b = subtract(&P, &three, &P, false); // P - 3
+        let correct_result = subtract(&P, &five, &P, false); // P - 5
+        println!("correct result {:?}", correct_result);
+        let result = addition(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
 
     #[test]
     fn test_simple_byte_array_substraction_with_carry() {
@@ -339,6 +378,49 @@ mod tests {
         // correct result here is P - 2
         // We'll calculate it dynamically using the subtract function itself
         correct_result = subtract(&correct_result, &two, &P, false);
+        let result = subtract(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_subtraction_zero_minus_p_minus_one() {
+        let a = [0; 32];
+        let mut b = P;
+        let one = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01,
+        ];
+        b = subtract(&b, &one, &P, false); // P - 1
+        let correct_result = one; // 1
+        let result = subtract(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_subtraction_near_p_small_difference() {
+        let one = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01,
+        ];
+        let two = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02,
+        ];
+        let a = subtract(&P, &one, &P, false); // P - 1
+        let b = subtract(&P, &two, &P, false); // P - 2
+        let correct_result = one; // 1
+        let result = subtract(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_subtraction_p_minus_p() {
+        let a = P;
+        let b = P;
+        let correct_result = [0; 32];
         let result = subtract(&a, &b, &P, false);
         assert_eq!(result, correct_result);
     }
