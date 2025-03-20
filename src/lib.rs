@@ -59,13 +59,6 @@ pub enum EcdsaError {
     InvalidPointAddition,
 }
 
-pub enum ArithmeticError {
-    InvalidAddition,
-    InvalidSubstraction,
-    InvalidMultiplicaiton,
-    //InvalidAddition,
-}
-
 /// Helper function to compare arrays of [u8;32] .
 /// TODO: Move to separate file later
 fn is_greater_or_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
@@ -152,7 +145,7 @@ mod arithmetic_operations {
 
         // We need to adjust result if our value is > P or >= P
         //
-        // Only adjust if not already 0 with carry (i.e., 2^256 mod P)
+        // Only subtract P if result isn’t 0 with a carry, which represents 2^256 mod P
         let is_zero = result.iter().all(|&x| x == 0);
         // carry != 0: a + b >= 2**256
         // result >= modulus: a + b > P
@@ -353,7 +346,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0xFF,
         ];
-        let result = subtract(&a, &b, &P, true);
+        let result = subtract(&a, &b, &P, false);
         assert_eq!(result, correct_result);
     }
 
