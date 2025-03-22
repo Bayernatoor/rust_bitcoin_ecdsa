@@ -185,6 +185,16 @@ mod arithmetic_operations {
 
         result
     }
+
+    /// computes the product of two 256-bit integers and reduces it modulos P
+    pub fn multiplication(
+        a: &[u8; 32],
+        b: &[u8; 32],
+        modulus: &[u8; 32],
+        adjustment: bool,
+    ) -> [u8; 32] {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
