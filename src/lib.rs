@@ -1,3 +1,6 @@
+pub mod helpers;
+
+use crate::helpers::utils::{div_rem, is_greater_or_equal};
 use sha2;
 
 // Elliptic curve formula = y**2 = x**3 + ax + b
@@ -55,26 +58,14 @@ pub const GENERATOR_Y: [u8; 32] = [
 // G constant (generator point) - all calculations start with this point
 pub const G: (&[u8; 32], &[u8; 32]) = (&GENERATOR_X, &GENERATOR_Y);
 
+#[derive(Debug)]
 pub enum EcdsaError {
     InvalidPointAddition,
 }
 
-/// Helper function to compare arrays of [u8;32] .
-/// TODO: Move to separate file later
-fn is_greater_or_equal(x: &[u8; 32], y: &[u8; 32]) -> bool {
-    println!("x: {:?}, y: {:?}", x, y);
-    for i in 0..32 {
-        if x[i] > y[i] {
-            println!("x is bigger, true");
-            return true;
-        }
-        if x[i] < y[i] {
-            println!("x is smaller(false)");
-            return false;
-        }
-    }
-    println!("they are equal ");
-    true
+#[derive(Debug)]
+pub enum ArithmeticError {
+    DivisionByZero,
 }
 
 // A point on the secp256k1 curve
@@ -176,6 +167,7 @@ mod arithmetic_operations {
         for i in (0..32).rev() {
             // cast values as u16 to catch overflow
             let mut temp = Wrapping(a[i] as u16) - Wrapping(b[i] as u16) - Wrapping(borrow as u16);
+            // If underflow (e.g., 0 - 1 = 65535), add 256 to get the byte result (0) and borrow 1
             if temp > Wrapping(255) {
                 temp += Wrapping(256);
                 borrow = 1;
@@ -200,39 +192,6 @@ mod tests {
     use arithmetic_operations::{addition, subtract};
 
     use super::*;
-
-    #[test]
-    fn test_is_greater_or_equal() {
-        // 256
-        let x1 = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x01, 0x00, 0x00,
-        ];
-        // 512
-        let y1 = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x02, 0x00, 0x00,
-        ];
-
-        let x2 = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x01, 0x00, 0x00,
-        ];
-
-        let y2 = [
-            0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x01, 0x00, 0x00,
-        ];
-
-        assert_eq!(is_greater_or_equal(&x1, &y1), false); // 256 < 512
-        assert_eq!(is_greater_or_equal(&y1, &x1), true); // 512 > 256
-        assert_eq!(is_greater_or_equal(&x2, &x1), true); // 256 = 256
-        assert_eq!(is_greater_or_equal(&y2, &y1), true); // 256 < 512
-    }
 
     #[test]
     fn test_simple_byte_array_addition() {
