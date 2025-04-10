@@ -2,4 +2,4 @@
 
 Do not use in production
 
-An ECDSA library written in Rust for bitcoin's secp256k1 curve.
+A library for digital signatures and other cryptographic primitives on the secp256k1 elliptic curve.
