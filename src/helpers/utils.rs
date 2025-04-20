@@ -56,6 +56,40 @@ pub fn div_rem(
     Ok((quotient, remainder))
 }
 
+pub fn reduce_modulus(full_product: [u16; 64], modulus: [u8; 32]) -> [u8; 32] {
+    let temp = full_product;
+    let mut padding = [0x00; 32];
+    let padded_mod = combine_u8_arrays_to_u16(padding, modulus);
+    println!("padded mod is {:?}", padded_mod);
+
+    // Reduce until top 32 bytes are zero and bottom 32 < modulus
+    while temp[0..32] != [0; 32] || temp[32..64] >= padded_mod {
+        temp = subtract(&temp, &padded_mod, &modulus, adjustment)
+    }
+
+    //if temp[32..64] <= modulus {
+    //    temp[32..64] = subtract(temp[32..64], modulus, &modulus, false)
+    //}
+
+    let reduced_result = [0u8; 32];
+    for i in 0..32 {
+        reduced_result[i] = temp[32..64][i] as u8;
+    }
+
+    return reduced_result;
+}
+
+fn combine_u8_arrays_to_u16(a: [u8; 32], b: [u8; 32]) -> [u16; 64] {
+    let mut result = [0u16; 64];
+
+    for i in 0..32 {
+        result[i] = a[i] as u16;
+        result[i + 32] = b[i] as u16;
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

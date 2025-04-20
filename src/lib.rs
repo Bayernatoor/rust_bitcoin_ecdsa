@@ -112,6 +112,8 @@ impl Point {
 mod arithmetic_operations {
     use std::num::Wrapping;
 
+    use helpers::utils::reduce_modulus;
+
     use super::*;
 
     // addition operation: c = (a + b) mod P
@@ -124,7 +126,8 @@ mod arithmetic_operations {
         let mut result = [0; 32];
         let mut carry = 0;
 
-        // iterate over 32 byte arrays from right to left
+        // iterate over 32 byte arrays from MSB (most significant byte to LSB (least significant
+        // byte)
         for i in (0..32).rev() {
             // cast values as u16 to catch overflow
             let temp = a[i] as u16 + b[i] as u16 + carry as u16;
@@ -163,7 +166,7 @@ mod arithmetic_operations {
         let mut result = [0; 32];
         let mut borrow = 0;
 
-        // iterate over 32 byte arrays from right to left
+        // iterate over 32 byte arrays from MSB to LSB
         for i in (0..32).rev() {
             // cast values as u16 to catch overflow
             let mut temp = Wrapping(a[i] as u16) - Wrapping(b[i] as u16) - Wrapping(borrow as u16);
@@ -177,31 +180,96 @@ mod arithmetic_operations {
             result[i] = temp.0 as u8;
         }
 
-        // if borrow is not 0, then result is negative
+        // if borrow is not 0, than result is negative
         // run the result through addition to add P to it
         if !adjustment && borrow != 0 {
             result = addition(&result, modulus, modulus, true);
         }
 
+        println!("result of subtraction {:?}", result);
         result
     }
 
     /// computes the product of two 256-bit integers and reduces it modulos P
+    /// 1. calculate the product of each byte pair
+    /// 2. Place these products in the correct positions of the result
+    /// 3. Handle carriers properly as they propagate through the array
     pub fn multiplication(
         a: &[u8; 32],
         b: &[u8; 32],
         modulus: &[u8; 32],
         adjustment: bool,
-    ) -> [u8; 32] {
+    ) -> [u8; 64] {
+        let mut full_product = [0x00; 64];
+
+        for i in (0..32).rev() {
+            let mut carry = 0;
+            for j in (0..32).rev() {
+                // low byte index
+                let mut index = 63 - i - j;
+                // calculate byte-wise multiplication
+                let mut sum = a[i] as u16 * b[j] as u16 + full_product[index] as u16 + carry as u16;
+                println!("product for a{} * b{} is {}", i, j, sum);
+                full_product[index] = sum & 0xFF;
+                carry = sum >> 8;
+                //  high byte index
+                index = 62 - i - j;
+                sum = full_product[index] + carry;
+                full_product[index] = sum & 0xFF;
+                carry = sum >> 8;
+
+                while carry > 0 && index > 0 {
+                    index = index - 1;
+                    sum = full_product[index] + carry;
+                    full_product[index] = sum & 0xFF;
+                    carry = sum >> 8;
+                }
+            }
+        }
+        // Normalize carries
+        let mut carry = 0;
+        for k in (0..64).rev() {
+            let sum = full_product[k] + carry;
+            full_product[k] = sum & 0xFF;
+            carry = sum >> 8
+        }
+
+        // moduar reduction
+        reduce_modulus(full_product, *modulus);
+
+        // adjusment via subtract if needed
+        //if !adjustment && result >= modulus {
+        //    result = subtract(result, , modulus, adjustment)
+        //}
+        println!("full product is; {:?}", full_product);
         unimplemented!()
     }
 }
+//// get bits 0-7
+//let low_byte = product & 0xFF;
+//// get bits 8-15
+//let high_byte = product >> 8;
+//
+//if full_product[i + j] + high_byte > 255 {
+//    let new_high_val = full_product[i + j] + high_byte % 256;
+//    carry = full_product[i + j] + high_byte / 256;
+//}
+//
+//if full_product[i + j + 1] + low_byte > 255 {
+//    let new_low_val = full_product[i + j + 1] + low_byte % 256;
+//    carry = full_product[i + j + 1] + low_byte / 256;
+//}
+//
+//full_product[i + j] = high_byte as u8;
+//full_product[i + j + 1] = low_byte as u8;
 
 #[cfg(test)]
 mod tests {
-    use arithmetic_operations::{addition, subtract};
+    use arithmetic_operations::{addition, multiplication, subtract};
 
     use super::*;
+
+    // Test Addition
 
     #[test]
     fn test_simple_byte_array_addition() {
@@ -298,8 +366,10 @@ mod tests {
         assert_eq!(result, correct_result);
     }
 
+    // Test Subtraction
+
     #[test]
-    fn test_simple_byte_array_substraction_with_carry() {
+    fn test_simple_byte_array_subtraction_with_carry() {
         let a: [u8; 32] = [
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -384,6 +454,40 @@ mod tests {
         let b = P;
         let correct_result = [0; 32];
         let result = subtract(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
+
+    // Test Multiplication
+
+    #[test]
+    fn test_multiplication_no_carry() {
+        let a = [0; 32];
+        let b = [0; 32];
+        let correct_result = [0; 64];
+        let result = multiplication(&a, &b, &P, false);
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_multiplication_with_carry() {
+        let a = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xFF,
+        ];
+        let b = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xFF,
+        ];
+        let correct_result = [
+            0xFE, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let result = multiplication(&a, &b, &P, false);
         assert_eq!(result, correct_result);
     }
 }
