@@ -3,12 +3,28 @@ use crate::P;
 use crate::arithmetic_operations::{addition, subtract};
 
 /// Helper function to compare if array a is >= b
-/// Specifically used to check if interger is >= P (modulus)
+/// Specifically used to check if 256-bit int is >= P (modulus)
 ///
 /// return true if: a >= b
 /// return false if a < b
 pub fn is_greater_or_equal(a: &[u8; 32], b: &[u8; 32]) -> bool {
     for i in 0..32 {
+        if a[i] > b[i] {
+            return true;
+        }
+        if a[i] < b[i] {
+            return false;
+        }
+    }
+    true
+}
+
+/// Specifically used to check if 512-bit int is >= P (modulus)
+///
+/// return true if: a >= b
+/// return false if a < b
+pub fn is_greater_or_equal_512(a: &[u8; 64], b: &[u8; 64]) -> bool {
+    for i in 0..64 {
         if a[i] > b[i] {
             return true;
         }
@@ -56,29 +72,53 @@ pub fn div_rem(
     Ok((quotient, remainder))
 }
 
-pub fn reduce_modulus(full_product: [u16; 64], modulus: [u8; 32]) -> [u8; 32] {
-    let temp = full_product;
-    let mut padding = [0x00; 32];
-    let padded_mod = combine_u8_arrays_to_u16(padding, modulus);
-    println!("padded mod is {:?}", padded_mod);
+// reduce 512-bit number to a 256-bits mod P
+pub fn reduce_modulus(full_product: [u8; 64], modulus: [u8; 32]) -> [u8; 32] {
+    let mut temp = full_product;
+    let padding = [0x00; 32];
+    let mut padded_mod = [0u8; 64];
+    padded_mod[..32].copy_from_slice(&padding);
+    padded_mod[32..].copy_from_slice(&modulus);
+    let mut bottom_half: [u8; 32] = temp[32..64].try_into().unwrap();
+    let mut top_half: [u8; 32] = temp[0..32].try_into().unwrap();
 
-    // Reduce until top 32 bytes are zero and bottom 32 < modulus
-    while temp[0..32] != [0; 32] || temp[32..64] >= padded_mod {
-        temp = subtract(&temp, &padded_mod, &modulus, adjustment)
+    // Reduce until top 32 bytes are zero or bottom 32 < modulus
+    while top_half != [0; 32] || is_greater_or_equal(&bottom_half, &modulus) {
+        if is_greater_or_equal_512(&temp, &padded_mod) {
+            temp = subtract_512(temp, padded_mod);
+        } else {
+            break;
+        }
+        bottom_half = temp[32..64].try_into().unwrap();
+        top_half = temp[0..32].try_into().unwrap();
     }
 
-    //if temp[32..64] <= modulus {
-    //    temp[32..64] = subtract(temp[32..64], modulus, &modulus, false)
-    //}
-
-    let reduced_result = [0u8; 32];
-    for i in 0..32 {
-        reduced_result[i] = temp[32..64][i] as u8;
+    if is_greater_or_equal(&bottom_half, &modulus) {
+        bottom_half = subtract(&bottom_half, &modulus, &modulus, false)
     }
 
-    return reduced_result;
+    return bottom_half;
 }
 
+// subtract 2 512-bit u8 arrays
+fn subtract_512(a: [u8; 64], b: [u8; 64]) -> [u8; 64] {
+    let mut result = [0; 64];
+    let mut borrow = 0;
+
+    for i in (0..64).rev() {
+        let mut diff = a[i] as u16 - b[i] as u16 - borrow as u16;
+        if diff < 0 {
+            diff = diff + 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        result[i] = diff as u8 & 0xFF;
+    }
+    result
+}
+
+// merge 2 u8 arrays into 1 u16 array
 fn combine_u8_arrays_to_u16(a: [u8; 32], b: [u8; 32]) -> [u16; 64] {
     let mut result = [0u16; 64];
 

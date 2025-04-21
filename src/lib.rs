@@ -199,7 +199,7 @@ mod arithmetic_operations {
         b: &[u8; 32],
         modulus: &[u8; 32],
         adjustment: bool,
-    ) -> [u8; 64] {
+    ) -> [u8; 32] {
         let mut full_product = [0x00; 64];
 
         for i in (0..32).rev() {
@@ -226,23 +226,23 @@ mod arithmetic_operations {
                 }
             }
         }
+
         // Normalize carries
         let mut carry = 0;
+        let mut normalized_product = [0u8; 64];
         for k in (0..64).rev() {
             let sum = full_product[k] + carry;
             full_product[k] = sum & 0xFF;
-            carry = sum >> 8
+            carry = sum >> 8;
+            normalized_product[k] = full_product[k] as u8;
         }
 
-        // moduar reduction
-        reduce_modulus(full_product, *modulus);
+        // modular reduction
+        // Intermediate result is a [u16; 64], reduce it using mod to [u8; 32]
+        let reduced_product = reduce_modulus(normalized_product, *modulus);
 
-        // adjusment via subtract if needed
-        //if !adjustment && result >= modulus {
-        //    result = subtract(result, , modulus, adjustment)
-        //}
-        println!("full product is; {:?}", full_product);
-        unimplemented!()
+        //println!("full product is; {:?}", full_product);
+        reduced_product
     }
 }
 //// get bits 0-7
