@@ -1,6 +1,7 @@
 use crate::ArithmeticError;
 use crate::P;
 use crate::arithmetic_operations::{addition, subtract};
+use std::num::Wrapping;
 
 /// Helper function to compare if array a is >= b
 /// Specifically used to check if 256-bit int is >= P (modulus)
@@ -75,46 +76,147 @@ pub fn div_rem(
 // reduce 512-bit number to a 256-bits mod P
 pub fn reduce_modulus(full_product: [u8; 64], modulus: [u8; 32]) -> [u8; 32] {
     let mut temp = full_product;
+    print!("temp is {:?}\n", temp);
     let padding = [0x00; 32];
     let mut padded_mod = [0u8; 64];
     padded_mod[..32].copy_from_slice(&padding);
     padded_mod[32..].copy_from_slice(&modulus);
+    print!("padded mod is {:?}\n", padded_mod);
     let mut bottom_half: [u8; 32] = temp[32..64].try_into().unwrap();
+    print!("bottom half is {:?}\n", bottom_half);
     let mut top_half: [u8; 32] = temp[0..32].try_into().unwrap();
+    print!("top half is {:?}\n", top_half);
 
     // Reduce until top 32 bytes are zero or bottom 32 < modulus
+    let mut count = 0;
     while top_half != [0; 32] || is_greater_or_equal(&bottom_half, &modulus) {
+        println!("while loop iteration {}\n", count);
         if is_greater_or_equal_512(&temp, &padded_mod) {
-            temp = subtract_512(temp, padded_mod);
+            println!("temp is larger than padded mod subtract\n");
+            count += 1;
+            temp = subtract_512(&temp, &padded_mod);
+            println!("subtracted, result: {:?}\n", temp);
         } else {
             break;
         }
         bottom_half = temp[32..64].try_into().unwrap();
+        print!("bottom half in loop {:?}\n", bottom_half);
         top_half = temp[0..32].try_into().unwrap();
+        print!("top half in loop {:?}\n", top_half);
     }
 
     if is_greater_or_equal(&bottom_half, &modulus) {
+        println!("bottom half is greater than mod, subtract\n");
         bottom_half = subtract(&bottom_half, &modulus, &modulus, false)
     }
+
+    println!("returning bottom 32 bytes {:?}\n", bottom_half);
 
     return bottom_half;
 }
 
+pub fn barrett_reduce(full_product: [u8; 64], modulus: [u8; 32]) -> [u8; 32] {
+    let mut mu = [0u8; 64];
+    let mut temp_value = [0u8; 64];
+
+    // Precompute mu
+    let mut mu_num = [0u8; 64];
+    mu_num[..32].copy_from_slice(&modulus);
+    mu_num[32..].copy_from_slice(&[0u8; 32]);
+    let mut mu_den = [0u8; 64];
+    mu_den[..32].copy_from_slice(&[0xFF; 32]);
+    mu_den[32..].copy_from_slice(&[0xFF; 32]);
+    println!("precomputing MU");
+    mu = multiply_512(&mu_num, &mu_den);
+    println!("precomputed MU is {:?}", mu);
+
+    // Reduce
+    let mut q = [0u8; 64];
+    q[..32].copy_from_slice(&full_product[32..64]);
+    q[32..].copy_from_slice(&[0u8; 32]);
+    temp_value = multiply_512(&q, &mu);
+    println!("reducing r, temp_value is {:?}", temp_value);
+    let mut r = subtract_512(&full_product, &temp_value);
+    println!("reducing r, subtract 512 {:?}", r);
+    while is_greater_or_equal_512(&r, &padded_mod(modulus)) {
+        r = subtract_512(&r, &padded_mod(modulus));
+    }
+
+    // Return reduced number
+    let mut result = [0u8; 32];
+    result.copy_from_slice(&r[32..64]);
+    result
+}
+
+/// Returns a padded modulus with a [0u8; 32] at the front.
+fn padded_mod(modulus: [u8; 32]) -> [u8; 64] {
+    let mut padded_mod = [0u8; 64];
+    padded_mod[..32].copy_from_slice(&[0u8; 32]);
+    padded_mod[32..].copy_from_slice(&modulus);
+
+    padded_mod
+}
+
+// multiple 2 512-bit u8 arrays
+fn multiply_512(a: &[u8; 64], b: &[u8; 64]) -> [u8; 64] {
+    let mut full_product = [0x00; 64];
+
+    for i in (0..64).rev() {
+        let mut carry = 0;
+        for j in (0..64).rev() {
+            // low byte index
+            let mut index = 63 - i - j;
+            // calculate byte-wise multiplication
+            let mut sum = a[i] as u16 * b[j] as u16 + full_product[index] as u16 + carry as u16;
+            println!("product for a{} * b{} is {}", i, j, sum);
+            full_product[index] = sum & 0xFF;
+            carry = sum >> 8;
+            //  high byte index
+            index = 62 - i - j;
+            sum = full_product[index] + carry;
+            full_product[index] = sum & 0xFF;
+            carry = sum >> 8;
+
+            while carry > 0 && index > 0 {
+                index = index - 1;
+                sum = full_product[index] + carry;
+                full_product[index] = sum & 0xFF;
+                carry = sum >> 8;
+            }
+        }
+    }
+
+    // Normalize carries
+    let mut carry = 0;
+    let mut normalized_product = [0u8; 64];
+    for k in (0..64).rev() {
+        let sum = full_product[k] + carry;
+        full_product[k] = sum & 0xFF;
+        carry = sum >> 8;
+        normalized_product[k] = full_product[k] as u8;
+    }
+
+    normalized_product
+}
+
 // subtract 2 512-bit u8 arrays
-fn subtract_512(a: [u8; 64], b: [u8; 64]) -> [u8; 64] {
+fn subtract_512(a: &[u8; 64], b: &[u8; 64]) -> [u8; 64] {
     let mut result = [0; 64];
     let mut borrow = 0;
 
     for i in (0..64).rev() {
-        let mut diff = a[i] as u16 - b[i] as u16 - borrow as u16;
-        if diff < 0 {
-            diff = diff + 256;
+        // cast values as u16 to catch overflow
+        let mut temp = Wrapping(a[i] as u16) - Wrapping(b[i] as u16) - Wrapping(borrow as u16);
+        // If underflow (e.g., 0 - 1 = 65535), add 256 to get the byte result (0) and borrow 1
+        if temp > Wrapping(255) {
+            temp += Wrapping(256);
             borrow = 1;
         } else {
             borrow = 0;
         }
-        result[i] = diff as u8 & 0xFF;
+        result[i] = temp.0 as u8;
     }
+
     result
 }
 
@@ -301,5 +403,51 @@ mod tests {
         let correct_answer = (quotient, remainder);
 
         assert_eq!(div_rem(&dividend, &divisor).unwrap(), correct_answer);
+    }
+
+    #[test]
+    fn test_simple_byte_array_512_subtraction_with_carry() {
+        let a: [u8; 64] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+        ];
+        let b: [u8; 64] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        ];
+        let correct_result: [u8; 64] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+        ];
+        let result = subtract_512(&a, &b);
+        assert_eq!(result, correct_result);
+    }
+
+    #[test]
+    fn test_simple_barrett_reduce() {
+        let large_number: [u8; 64] = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+        ];
+        let modulus = P;
+        let result = barrett_reduce(large_number, modulus);
+        let correct_result = [
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0xFF,
+        ];
+        assert_eq!(result, correct_result);
     }
 }
